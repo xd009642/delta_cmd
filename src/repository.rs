@@ -5,7 +5,7 @@ use git2::{DiffOptions, Repository};
 pub fn is_considered(path: &Path) -> bool {
     let ext = match path.extension().and_then(|e| e.to_str()) {
         Some(e) => e.to_ascii_lowercase(),
-        None => return false,
+        None => return path.is_dir(),
     };
     matches!(
         ext.as_str(),
@@ -33,13 +33,11 @@ pub fn get_changed_source_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let diff =
         repo.diff_tree_to_tree(Some(&parent_tree), Some(&commit_tree), Some(&mut diff_opt))?;
 
-    println!("Files changed in last commit:");
-
     let mut considered_files = vec![];
     diff.foreach(
         &mut |delta, _| {
             if let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) {
-                if is_considered(path) {
+                if is_considered(&root.join(path)) {
                     considered_files.push(path.to_path_buf());
                 }
             }

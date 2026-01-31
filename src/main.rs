@@ -30,7 +30,6 @@ fn main() -> anyhow::Result<()> {
     let root = args.path();
 
     let considered_files = repository::get_changed_source_files(&root)?;
-    println!("We are considering: {:?}", considered_files);
 
     // Now from these files we want to create a list of projects in the workspace we should run
     // tests on. This is done via two easy checks:
@@ -46,9 +45,12 @@ fn main() -> anyhow::Result<()> {
 
     let mut changed_packages = BTreeSet::new();
 
+    let mut end_package_names = BTreeSet::new();
+
     for file in &considered_files {
-        if let Some(changed) = packages.get_ancestor_value(&root.join(file)) {
-            changed_packages.insert(changed);
+        if let Some(package) = packages.get_ancestor_value(&root.join(file)) {
+            changed_packages.insert(root.join(file));
+            end_package_names.insert(package.name.as_str());
         }
     }
 
@@ -57,19 +59,32 @@ fn main() -> anyhow::Result<()> {
     while changed_packages_previous != changed_packages.len() {
         changed_packages_previous = changed_packages.len();
 
-        for val in packages.values() {
-            //if changed_packages.contains(&
-            for dep in val
+        for (key, val) in packages.iter() {
+            if val
                 .dependencies
                 .iter()
-                .filter_map(|x| packages.get_ancestor_value(x))
+                .any(|x| changed_packages.contains(x))
             {
-                changed_packages.insert(dep);
+                if let Some(package) = packages.get_ancestor_value(&root.join(key)) {
+                    changed_packages.insert(root.join(key));
+                    end_package_names.insert(package.name.as_str());
+                }
             }
         }
     }
 
-    println!("Changed packages: {:?}", changed_packages);
+    if !changed_packages.is_empty() {
+        println!(
+            "Changed packages end: `-p {}`",
+            end_package_names
+                .iter()
+                .map(|x| *x)
+                .collect::<Vec<_>>()
+                .join(" -p ")
+        );
+    } else {
+        println!("No packages have changed");
+    }
 
     Ok(())
 }
