@@ -1,8 +1,12 @@
+use anyhow::Context;
+use cargo::Package;
 use clap::Parser;
-use radix_trie::TrieCommon;
-use std::collections::BTreeSet;
+use minijinja::{Environment, Value};
+use radix_trie::{Trie, TrieCommon};
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 mod cargo;
 mod repository;
@@ -12,6 +16,15 @@ pub struct Args {
     /// Get the project to run on, runs in current directory otherwise.
     #[clap(short, long)]
     input: Option<PathBuf>,
+    /// Run the following command. This accepts a minijinja template where `packages` is a list of
+    /// packages that can be included and `excludes` is a list of packages that can be excluded.
+    /// For a cargo test you can write the template `cargo test {% for pkg in packages %} -p {{ pkg
+    /// }}{% endfor %}`
+    #[clap(short, long)]
+    command: Option<String>,
+    /// Generate command but don't run it
+    #[clap(long)]
+    no_run: bool,
 }
 
 impl Args {
@@ -21,6 +34,58 @@ impl Args {
             None => env::current_dir().unwrap(),
         }
     }
+}
+
+fn generate_exclude_list<'a>(
+    packages: impl Iterator<Item = &'a Package>,
+    included_packages: &BTreeSet<&str>,
+) -> BTreeSet<&'a str> {
+    packages
+        .filter(|x| !included_packages.contains(x.name.as_str()))
+        .map(|x| x.name.as_str())
+        .collect::<BTreeSet<_>>()
+}
+
+fn generate_command(
+    template: &str,
+    packages: &Trie<PathBuf, Package>,
+    included_packages: &BTreeSet<&str>,
+) -> anyhow::Result<Command> {
+    let mut env = Environment::new();
+    env.add_template("cmd", template)?;
+    let expr = env.get_template("cmd")?;
+
+    let variable_names = expr.undeclared_variables(true);
+    let mut variables = HashMap::new();
+    for var in variable_names.iter() {
+        match var.as_str() {
+            "packages" => {
+                variables.insert("packages", Value::from_serialize(included_packages));
+            }
+            "excludes" => {
+                variables.insert(
+                    "excludes",
+                    Value::from_serialize(generate_exclude_list(
+                        packages.values(),
+                        included_packages,
+                    )),
+                );
+            }
+            s => anyhow::bail!("Unsupported variable `{}`", s),
+        }
+    }
+    let result = expr.render(&variables)?;
+
+    let parts = shell_words::split(result.as_str())?;
+    let mut part_iter = parts.into_iter();
+    let exe = part_iter.next().context("No program name")?;
+    let mut cmd = Command::new(exe);
+
+    cmd.args(part_iter)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    Ok(cmd)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -73,7 +138,16 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if !changed_packages.is_empty() {
+    //let exclude = generate_exclude_list(packages.values(), &end_package_names);
+
+    if let Some(cmd) = args.command {
+        let mut cmd = generate_command(&cmd, &packages, &end_package_names)?;
+        if args.no_run {
+            println!("{:?}", cmd);
+        } else {
+            cmd.status()?;
+        }
+    } else if !changed_packages.is_empty() {
         println!(
             "Changed packages end: `-p {}`",
             end_package_names

@@ -8,4 +8,6 @@ anyhow = "1.0.100"
 cargo_metadata = "0.23.1"
 clap = { version = "4.5.56", features = ["derive"] }
 git2 = "0.20.3"
+minijinja = "2.15.1"
 radix_trie = "0.3.0"
+shell-words = "1.1.1"
