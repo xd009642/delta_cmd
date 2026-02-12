@@ -93,6 +93,7 @@ fn generate_command(
     template: &str,
     packages: &Trie<PathBuf, Package>,
     included_packages: &BTreeSet<&str>,
+    args: &[String],
 ) -> anyhow::Result<Command> {
     let mut env = Environment::new();
     env.add_template("cmd", template)?;
@@ -114,6 +115,9 @@ fn generate_command(
                     )),
                 );
             }
+            "args" => {
+                variables.insert("args", Value::from_serialize(args));
+            }
             s => anyhow::bail!("Unsupported variable `{}`", s),
         }
     }
@@ -133,7 +137,6 @@ fn generate_command(
 
 fn main() -> anyhow::Result<()> {
     let args = RunCommand::parse();
-    println!("{:?}", args);
 
     let root = args.required_args().path();
 
@@ -184,7 +187,12 @@ fn main() -> anyhow::Result<()> {
     //let exclude = generate_exclude_list(packages.values(), &end_package_names);
 
     if let Some(cmd) = args.command() {
-        let mut cmd = generate_command(&cmd, &packages, &end_package_names)?;
+        let mut cmd = generate_command(
+            &cmd,
+            &packages,
+            &end_package_names,
+            &args.required_args().args,
+        )?;
         if args.required_args().no_run {
             println!("{:?}", cmd);
         } else {
