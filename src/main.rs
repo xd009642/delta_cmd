@@ -3,6 +3,7 @@ use cargo::Package;
 use clap::Parser;
 use minijinja::{Environment, Value};
 use radix_trie::{Trie, TrieCommon};
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::path::PathBuf;
@@ -11,29 +12,71 @@ use std::process::{Command, Stdio};
 mod cargo;
 mod repository;
 
+const CARGO_TEST_TEMPLATE: &'static str = "cargo test {% for pkg in packages %} -p {{ pkg }} {% endfor %} {% for arg in args %} {{ arg }} {% endfor %}";
+const CARGO_NEXTEST_TEMPLATE: &'static str = "cargo nextest {% for pkg in packages %} -p {{ pkg }} {% endfor %} {% for arg in args %} {{ arg }} {% endfor %}";
+const CARGO_BUILD_TEMPLATE: &'static str = "cargo build {% for pkg in packages %} -p {{ pkg }} {% endfor %} {% for arg in args %} {{ arg }} {% endfor %}";
+const CARGO_BENCH_TEMPLATE: &'static str = "cargo build {% for pkg in packages %} -p {{ pkg }} {% endfor %} {% for arg in args %} {{ arg }} {% endfor %}";
+
 #[derive(Debug, Parser)]
-pub struct Args {
-    /// Get the project to run on, runs in current directory otherwise.
-    #[clap(short, long)]
-    input: Option<PathBuf>,
-    /// Run the following command. This accepts a minijinja template where `packages` is a list of
-    /// packages that can be included and `excludes` is a list of packages that can be excluded.
-    /// For a cargo test you can write the template `cargo test {% for pkg in packages %} -p {{ pkg
-    /// }}{% endfor %}`
-    #[clap(short, long)]
-    command: Option<String>,
-    /// Generate command but don't run it
-    #[clap(long)]
-    no_run: bool,
+pub enum RunCommand {
+    Test(RequiredArgs),
+    Nextest(RequiredArgs),
+    Build(RequiredArgs),
+    Bench(RequiredArgs),
+    Run(Args),
 }
 
-impl Args {
-    pub fn path(&self) -> PathBuf {
+impl RunCommand {
+    pub fn required_args(&self) -> &RequiredArgs {
+        match self {
+            Self::Test(a) | Self::Nextest(a) | Self::Build(a) | Self::Bench(a) => a,
+            Self::Run(a) => &a.required,
+        }
+    }
+
+    pub fn command(&self) -> Option<Cow<'_, str>> {
+        match self {
+            Self::Test(_) => Some(CARGO_TEST_TEMPLATE.into()),
+            Self::Nextest(_) => Some(CARGO_NEXTEST_TEMPLATE.into()),
+            Self::Build(_) => Some(CARGO_BUILD_TEMPLATE.into()),
+            Self::Bench(_) => Some(CARGO_BENCH_TEMPLATE.into()),
+            Self::Run(a) => a.command.as_ref().map(|x| x.into()),
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
+pub struct RequiredArgs {
+    /// Get the project to run on, runs in current directory otherwise.
+    #[arg(short, long)]
+    input: Option<PathBuf>,
+    /// Generate command but don't run it
+    #[arg(long)]
+    no_run: bool,
+    /// These will be passed to the minijinja template as the args variable
+    #[arg(last = true)]
+    args: Vec<String>,
+}
+
+impl RequiredArgs {
+    fn path(&self) -> PathBuf {
         match self.input.as_ref() {
             Some(s) => s.clone(),
             None => env::current_dir().unwrap(),
         }
     }
+}
+
+#[derive(Debug, Parser)]
+pub struct Args {
+    /// Run the following command. This accepts a minijinja template where `packages` is a list of
+    /// packages that can be included and `excludes` is a list of packages that can be excluded.
+    /// For a cargo test you can write the template `cargo test {% for pkg in packages %} -p {{ pkg
+    /// }}{% endfor %}`
+    #[arg(short, long)]
+    command: Option<String>,
+    #[command(flatten)]
+    required: RequiredArgs,
 }
 
 fn generate_exclude_list<'a>(
@@ -89,10 +132,10 @@ fn generate_command(
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    // Open the repository (current directory)
+    let args = RunCommand::parse();
+    println!("{:?}", args);
 
-    let root = args.path();
+    let root = args.required_args().path();
 
     let considered_files = repository::get_changed_source_files(&root)?;
 
@@ -140,9 +183,9 @@ fn main() -> anyhow::Result<()> {
 
     //let exclude = generate_exclude_list(packages.values(), &end_package_names);
 
-    if let Some(cmd) = args.command {
+    if let Some(cmd) = args.command() {
         let mut cmd = generate_command(&cmd, &packages, &end_package_names)?;
-        if args.no_run {
+        if args.required_args().no_run {
             println!("{:?}", cmd);
         } else {
             cmd.status()?;
