@@ -194,7 +194,10 @@ fn main() -> anyhow::Result<()> {
             &args.required_args().args,
         )?;
         if args.required_args().no_run {
-            println!("{:?}", cmd);
+            let mut args = vec![];
+            args.push(cmd.get_program().to_string_lossy());
+            args.extend(cmd.get_args().into_iter().map(|x| x.to_string_lossy()));
+            println!("{}", shell_words::join(args));
         } else {
             cmd.status()?;
         }
