@@ -1,6 +1,5 @@
-use std::path::{Path, PathBuf};
-
 use git2::{DiffOptions, Repository};
+use std::path::{Path, PathBuf};
 
 pub fn is_considered(path: &Path) -> bool {
     let ext = match path.extension().and_then(|e| e.to_str()) {
