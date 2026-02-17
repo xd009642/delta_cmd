@@ -8,7 +8,7 @@ pub fn is_considered(path: &Path) -> bool {
     };
     matches!(
         ext.as_str(),
-        "rs" | "c" | "cpp" | "h" | "hpp" | "cc" | "cxx" | "toml"
+        "rs" | "c" | "cpp" | "h" | "hpp" | "cc" | "cxx" | "toml" | "pb"
     )
 }
 
